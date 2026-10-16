@@ -1,0 +1,22 @@
+[project]
+name = "flamecast"
+version = "0.1.0"
+description = "GPU wildfire simulator and neural surrogate"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pyyaml>=6.0.3",
+    "scipy>=1.18.1",
+    "torch>=2.14.1",
+    "zarr>=3.4.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+markers = ["gpu: needs a CUDA GPU (run on PACE)"]

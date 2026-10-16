@@ -1,0 +1,8 @@
+# Shared by every simulator tier (SIM-6). Experiments copy and override this file.
+grid_size: 256
+cell_size_m: 30
+stencil: 8            # 8 or 16 (SIM-8)
+max_iters: 500
+arrival_cap_h: 6
+fuels: [GR2, SH5, TL3]
+curing: 0.5           # GR2 live herbaceous curing fraction, fixed in v1
