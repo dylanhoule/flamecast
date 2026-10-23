@@ -1,101 +1,128 @@
 # Flamecast: project breakdown
 
 ## Context
-`prd.md` describes a 3-layer project (GPU Rothermel simulator, procedurally generated dataset, neural surrogate + browser demo). The repo is greenfield (only `prd.md`). Goal of this step: turn the PRD into an ordered set of parts with tasks and exit gates, written to `docs/plan.md` as a checkbox tracker. Dylan writes the code; Claude reviews, explains, and scaffolds only when asked.
+`prd.md` describes a 3-layer project (GPU Rothermel simulator, procedurally generated dataset, neural surrogate + browser demo). This file turns it into ordered parts with tasks and exit gates. Dates live in `prd.md` (Milestones and timeline); this file only tracks order. Dylan writes the code; Claude reviews, explains, and scaffolds only when asked.
 
-## Decisions captured from Q&A
-- PACE access: **not confirmed**. Develop T0/T1/dataset locally on Mac (arm64, MPS) at 64 to 128 grids; cloud GPU fallback for T2 if PACE slips past Nov 1.
+## Scope rules
+1. **Gates are hard.** A part's gate must pass before the next part on the same track starts.
+2. **Parking lot, not plan.** New ideas go to the bottom of this file, reviewed only after launch.
+3. **Shrink inside a part, don't extend it.** If a part runs long, cut within it before pushing later parts.
+
+## Decisions captured
+- PACE access: **not confirmed**. Develop T0/T1/dataset locally on Mac (arm64, MPS) at 64 to 128 grids; cloud GPU fallback for T2.
 - Env: **uv + Python 3.12** (local default is 3.14, too new for PyTorch wheels).
-- Fuels: **Scott & Burgan GR2, SH5, TL3**. Note: GR2 is a *dynamic* model (live herbaceous load transfers to dead by curing), so T0 needs a curing-fraction input or a fixed curing value. 4th OOD fuel: pick a static one (e.g. GS2 or TU1) later.
-- Rothermel reference values: **unresolved**, becomes task 1.2.
-- Demo sim: **WebGPU port in v1** (SIM-11 moves P2 to P0). Launch date: **decide at the T2 gate**, tracked against Jan 24.
-- Flames code: not available, so DEMO-9 (3D toggle) is from scratch; keep it P1.
-- Tracking: W&B (default, free for students). CI: GitHub + Actions for CPU tests, GPU tests manual on PACE. Repo can stay private until launch.
-- Name undecided: use `flamecast` as repo/package name for now.
-- Write-up: blog post for v1; arXiv-style paper becomes a stretch item.
+- Fuels: **full 40-model Scott & Burgan table** implemented; dataset uses **GR2, SH5, TL3** (GR2 dynamic, fixed curing), 4th OOD fuel static (GS2 or TU1).
+- Rothermel reference values: **unresolved**, task 1.2.
+- **Spec review (Oct 18):**
+  - CPU baseline is **multicore Dijkstra**, not NumPy Jacobi; GPU target X set at the T1 gate. Kernel judged on time to finish and work vs Dijkstra, not bandwidth percentage.
+  - **16-neighbor stencil default**, no corner cutting; 8 for speed comparison, 32 for accuracy.
+  - Determinism comes from **running to convergence**; T0 stays Jacobi for readability, T2 may update in place within tiles.
+  - Ellipse shape from **effective wind** (wind + slope), capped. Wind is **midflame, 0 to 6 m/s** (OOD 6 to 10).
+  - Problem statement rewritten (world-model data framing; gradients are sparse, not absent).
+  - Surrogate: fire-size control and per-bucket IoU, ellipse baseline as input channel, data scaling curve, unseen barrier layouts as a 5th OOD set, soft-min simulator gradients as the inverse-mode baseline.
+  - **WebGPU cut from v1**; demo simulator is TypeScript/WebAssembly Dijkstra.
+  - **ML runs in parallel with T2**; the dataset only needs T1.
+- Tracking: W&B. CI: GitHub Actions for CPU tests, GPU tests manual on PACE. Repo private until launch.
+- Name: `flamecast` for now. Write-up: blog post for v1; arXiv-style paper is stretch.
+
+## Status (Oct 23)
+- Part 0: done except 0.5 (PACE email not sent).
+- Part 1: not started; 1.2 oracle still unresolved.
+- Without PACE, everything except Part 3 (CUDA) can run on the Mac.
 
 ## Parts (in dependency order)
 
-### Part 0: Setup (week of Oct 19, ~3 hrs)
+### Part 0: Setup
 - [x] 0.1 `uv init`, Python 3.12, deps: numpy, scipy, torch, pyyaml, zarr, pytest, matplotlib
 - [x] 0.2 Repo layout per PRD (create dirs only as each part needs them)
-- [ ] 0.3 GitHub repo (workflow in place: .github/workflows/ci.yml) + Actions running `pytest -m "not gpu"`
+- [x] 0.3 GitHub repo (workflow in place: .github/workflows/ci.yml) + Actions running `pytest -m "not gpu"`
 - [x] 0.4 One shared config schema (YAML) + loader: grid size, cell size, fuel table, stencil, max iters (SIM-6)
 - [ ] 0.5 Email PACE / Supercomputing Club about access (blocking risk, do day 1)
 
-### Part 1: T0 NumPy reference (Oct 19 to Nov 1)
-- [ ] 1.1 `sim/fuels.py`: SB40 params for GR2, SH5, TL3 (+ non-burnable)
-- [ ] 1.2 Pick a Rothermel oracle: BehavePlus tables, or a Python implementation (e.g. pyretechnics) cross-checked against a few published GTR-371 numbers
-- [ ] 1.3 `sim/rothermel.py`: each term (I_R, ξ, ρ_b, ε, Q_ig, φ_w, φ_s) tested separately, then R0 and head rate; imperial inside
-- [ ] 1.4 Ellipse: Anderson LB, eccentricity, R(θ); wind + slope vector sum for max-spread direction
-- [ ] 1.5 `sim/reference.py`: 8-neighbor Jacobi arrival-time relaxation, 6 h cap, non-burnable blocking
-- [ ] 1.6 `tests/test_physics.py`: spread rate within 5%, calm-flat circle, wind ellipse LB within 5%, upslope factor, barrier, 90-degree rotation exactness, grid convergence
-- [ ] 1.7 16-neighbor stencil (SIM-8) if calm-flat radius variation > 3% (it will be with 8 neighbors; plan for it)
-- **Gate:** all Layer 1 physics tests pass on T0.
+### Part 1: T0 NumPy reference + CPU baseline
+- [ ] 1.1 `sim/fuels.py`: full SB40 table (40 models + non-burnable); dataset uses GR2, SH5, TL3
+- [ ] 1.2 Pick a Rothermel oracle (pyretechnics scripted, spot-checked against GTR-371 / BehavePlus); fixtures cover all 40 models
+- [ ] 1.3 `sim/rothermel.py`: each term tested separately, then R0 and head rate; imperial inside
+- [ ] 1.4 Ellipse: LB from **effective** wind (wind + slope), capped; verify LB wind units; eccentricity, R(θ)
+- [ ] 1.5 `sim/reference.py`: 16-neighbor (8, 32 options) Jacobi relaxation, 6 h cap, no corner cutting (diagonal: both corner cells; knight: both crossed cells), raise on non-convergence
+- [ ] 1.6 `sim/dijkstra.py`: SciPy Dijkstra on the same graph and edge costs; bit-identical to T0
+- [ ] 1.7 `tests/test_physics.py`:
+  - spread rate within 5% of the oracle
+  - stencil shape error vs exact circle/ellipse at 8/16/32 neighbors, calm and wind on/off axis (16: at most 3% calm)
+  - on-axis wind ellipse LB within 5%
+  - upslope factor + calm-slope elongation
+  - barriers: straight and diagonal 1-cell lines, every stencil
+  - exact 90-degree rotation
+  - update-order independence (Jacobi, in-place random order, Dijkstra bit-identical)
+  - grid convergence along axes only
+- **Gate:** all Layer 1 physics tests pass on T0; Dijkstra matches T0 bit for bit.
 
-### Part 2: T1 batched PyTorch (Nov 2 to Nov 15)
-- [ ] 2.1 `sim/torch_sim.py`: same math on `[B,H,W]` via shifted-tensor stencil (roll/pad), runs on CPU, MPS, CUDA
-- [ ] 2.2 Convergence check: stop when no cell changes, or max iters
-- [ ] 2.3 Multicore NumPy CPU baseline (multiprocessing over scenarios) for honest speedup
-- [ ] 2.4 `tests/test_tiers.py`: T0 vs T1, 100 random scenarios, 1e-4 relative
-- [ ] 2.5 First benchmark script (`make bench`), record numbers
-- **Gate:** tier test passes; first speedup number recorded.
+### Part 2: T1 batched PyTorch + baseline benchmark
+- [ ] 2.1 `sim/torch_sim.py`: same math on `[B,H,W]` via shifted-tensor stencil (pad, never roll), CPU, MPS, CUDA
+- [ ] 2.2 Convergence check: stop when no cell changes; raise at the iteration limit
+- [ ] 2.3 Multicore Dijkstra baseline over the same 10,000 scenarios, graph build included, named CPU
+- [ ] 2.4 `tests/test_tiers.py`: T0 vs T1, 100 random scenarios, 1e-4 relative, cells within 1e-3 h of the cap excluded from mask comparison
+- [ ] 2.5 Benchmark script (`make bench`): T1 vs Dijkstra; **set the GPU target X**
+- **Gate:** tier test passes; baseline and T1 numbers recorded; X set.
 
-### Part 3: T2 CUDA kernel (Nov 16 to Dec 6, hard 3-week timebox)
-- [ ] 3.1 PyTorch C++ extension skeleton (`load_inline` or `setup.py`), naive one-thread-per-cell kernel, batch on grid z
-- [ ] 3.2 Match T0 via the same tier test (marked `gpu`)
-- [ ] 3.3 Shared-memory 32x32 tile + halo, block-level changed flag
-- [ ] 3.4 Nsight Compute: bandwidth vs peak, roofline note for the write-up
-- [ ] 3.5 Slurm scripts in `slurm/`
-- **Gate:** matches T0 and hits 60% peak BW, or timebox ends and v1 continues on T1. **Set the launch date here.**
+### Track A, Part 3: T2 CUDA kernel (hard 3-week timebox)
+- [ ] 3.1 PyTorch C++ extension skeleton, naive one-thread-per-cell kernel, batch on grid z
+- [ ] 3.2 Match T0 via the tier test (marked `gpu`)
+- [ ] 3.3 Shared-memory 32x32 tile + 2-cell halo; iterate in-tile until settled; block-level changed flag
+- [ ] 3.4 Active-tile list (skip tiles with no active cells); edge costs computed on the fly
+- [ ] 3.5 Report: time to finish batch, updates per fire vs Dijkstra edge count, Nsight roofline placement
+- [ ] 3.6 Slurm scripts in `slurm/`
+- **Gate:** matches T0 and beats Dijkstra by X, or the timebox ends and v1 continues on T1.
 
-### Buffer: finals (Dec 7 to Dec 16)
+### Track B, Part 4: Dataset (in parallel with Part 3, starts at the T1 gate)
+- [ ] 4.1 `data/terrain.py`: seeded fractal heightmaps, noise-shaped fuel patches, 0 to 10% non-burnable, fuel-break line generator (training layouts + unseen OOD layouts)
+- [ ] 4.2 `data/sampler.py`: Latin hypercube over moisture, **midflame** wind 0 to 6 m/s (OOD 6 to 10), direction
+- [ ] 4.3 Fire-size check: burned-fraction distribution; resample so it spans a range; store fire-size bucket per sample (DATA-8)
+- [ ] 4.4 Domain-exit check: how often fires reach the edge before 6 h; pick a fix and record it
+- [ ] 4.5 `data/generate.py`: run T1 in chunks, write Zarr (1 scenario per chunk), metadata JSON, folder named by config hash + git commit
+- [ ] 4.6 Splits by terrain seed: 8k/1k/1k + 5 OOD x 500 (high wind, high relief, unseen fuel, multi-ignition, unseen barriers; multi-ignition needs SIM-9)
+- [ ] 4.7 Byte-identical regeneration test; `make dataset`; viewer script (DATA-6)
+- **Gate:** all splits generated and versioned in under 15 min; fire-size distribution reported.
 
-### Part 4: Dataset (Dec 17 to ~Dec 23)
-- [ ] 4.1 `data/terrain.py`: seeded fractal heightmaps, noise-shaped fuel patches, 0 to 10% non-burnable
-- [ ] 4.2 `data/sampler.py`: Latin hypercube (`scipy.stats.qmc.LatinHypercube`) over moisture, wind speed, direction
-- [ ] 4.3 `data/generate.py`: run sim in chunks, write Zarr (1 scenario per chunk), metadata JSON, folder named by config hash + git commit
-- [ ] 4.4 Splits by terrain seed: 8k/1k/1k + 4 OOD x 500 (high wind, high relief, unseen fuel, multi-ignition; multi-ignition needs SIM-9)
-- [ ] 4.5 Byte-identical regeneration test; `make dataset`
-- [ ] 4.6 Viewer script (DATA-6)
-- **Gate:** all splits generated and versioned in under 15 min.
-
-### Part 5: Surrogate (~Dec 23 to Dec 31)
-- [ ] 5.1 `model/baseline_ellipse.py` B0
-- [ ] 5.2 Input channel builder (~12 channels incl. distance transform)
+### Track B, Part 5: Surrogate (first U-Net during the T2 timebox)
+- [ ] 5.1 `model/baseline_ellipse.py` B0 (effective wind)
+- [ ] 5.2 Input channel builder (~13 channels incl. distance transform and B0 arrival map)
 - [ ] 5.3 Physics-consistent 8x augmentation (rotate wind + slope vectors) + `tests/test_augment.py`
-- [ ] 5.4 `model/unet.py` with arrival + burned-mask heads; masked MSE + BCE
+- [ ] 5.4 `model/unet.py` predicting a correction to B0; arrival + burned-mask heads; masked MSE + BCE
 - [ ] 5.5 `model/train.py`: AdamW, cosine + warmup, bf16, early stop on val IoU, W&B logging of config/commit/dataset hash
-- **Gate:** beats B0 and reaches 0.85 IoU at 2 h on validation.
+- [ ] 5.6 Data scaling: train at 1k / 3k / 8k / 50k fires (generate extra train-only scenarios)
+- **Gate:** beats B0 in every fire-size bucket and reaches 0.85 IoU at 2 h on validation.
 
-### Part 6: Evaluation + export (Jan 1 to Jan 10)
-- [ ] 6.1 `eval/metrics.py`: IoU at 1/2/4/6 h, arrival MAE, area error, Hausdorff
-- [ ] 6.2 `eval/run_eval.py`: all models x all test sets, one table; test set touched once
-- [ ] 6.3 OOD curves (wind, relief, fuel minimum), `eval/gallery.py` 20 worst cases
+### Buffer: finals
+
+### Part 6: Evaluation + export
+- [ ] 6.1 `eval/metrics.py`: IoU at 1/2/4/6 h (overall and per fire-size bucket), arrival MAE, area error, Hausdorff
+- [ ] 6.2 `eval/run_eval.py`: all models x all test sets x fire-size buckets, one table; test set touched once; prior work (Burge et al.) in the table after verifying their numbers
+- [ ] 6.3 OOD curves (wind, relief, fuel, barriers), `eval/gallery.py` 20 worst cases, data scaling plot
 - [ ] 6.4 `model/export_onnx.py`, float16, PyTorch vs ONNX within 1e-3
 - **Gate:** results final, ONNX parity passes.
 
-### Part 7: WebGPU simulator (new in v1, ~2 weeks, can start in parallel with Part 6)
+### Part 7: Demo + write-up
 - [ ] 7.1 Vite + TypeScript app shell
-- [ ] 7.2 WGSL compute shader port of the relaxation (fp32), precompute R0 on CPU or shader
-- [ ] 7.3 Parity test vs T0 at 128x128 (export a few T0 outputs as JSON fixtures)
-- [ ] 7.4 Fallback: CPU Web Worker at 128x128 if WebGPU unavailable (phones)
-- **Gate:** matches T0 at 128 and runs 256 live in Chrome.
-
-### Part 8: Demo + write-up (after Parts 6 and 7)
-- [ ] 8.1 Side-by-side panels, ONNX Runtime Web (WebGPU, WASM fallback), lazy-loaded weights
-- [ ] 8.2 Controls: wind (training range shaded), direction, moisture, ignition click, firebreak brush, time scrubber, new terrain, "Break it"
-- [ ] 8.3 Diff overlay + live IoU/area/timing readout
-- [ ] 8.4 Mobile stacked layout; Lighthouse first paint under 3 s on LTE
-- [ ] 8.5 Pages: How it works, Results, Links; deploy static to a dylanhoule.dev subdomain
-- [ ] 8.6 README benchmark table, blog post, repo public
+- [ ] 7.2 TypeScript or WebAssembly Dijkstra solver in a Web Worker at 256 x 256; parity vs T0 on exported JSON fixtures
+- [ ] 7.3 Side-by-side panels, ONNX Runtime Web (WebGPU, WASM fallback), lazy-loaded weights
+- [ ] 7.4 Controls: midflame wind 0 to 10 m/s (training range 0 to 6 shaded, 20-ft equivalent shown), direction, moisture, ignition click, firebreak brush, time scrubber, new terrain, "Break it" at 9 m/s
+- [ ] 7.5 Diff overlay + live IoU/area/timing readout
+- [ ] 7.6 Mobile stacked layout; Lighthouse first paint under 3 s on LTE
+- [ ] 7.7 Pages: How it works (incl. no-spotting limit), Results, Links; deploy static to a dylanhoule.dev subdomain
+- [ ] 7.8 README benchmark table (vs Dijkstra, hardware named), blog post, repo public
 - **Gate:** every v1 acceptance box in the PRD ticked.
 
 ### Stretch (post-launch)
-FNO (ML-6), 3D toggle (DEMO-9), inverse mode (ML-8, DEMO-10), autoregressive (ML-7), arXiv paper, real terrain (DATA-7).
+WebGPU simulator (SIM-11), FNO (ML-6), 3D toggle (DEMO-9), inverse mode with soft-min simulator baseline (ML-8, DEMO-10), autoregressive (ML-7), arXiv paper, real terrain (DATA-7; the full SB40 table makes this physics-free).
 
-## Risks newly raised by these answers
-- WebGPU in v1 + no Flames reuse adds ~2 to 3 weeks; launch likely mid-Feb. Decide at the T2 gate.
-- GR2 dynamic loading complicates Rothermel; if the oracle check fails, swap to static GS2 for v1.
-- No PACE access yet: if not confirmed by Nov 1, line up a cloud GPU (Colab Pro / Lambda) for Part 3.
+## Risks
+- **GPU barely beats CPU Dijkstra.** The naive kernel's lead is about 10x at best; work efficiency (3.3, 3.4) is the whole game. If X isn't met, publish the honest number and the work-count analysis.
+- **GR2 dynamic loading** complicates Rothermel; if the oracle check fails, swap to static GS2 for v1.
+- **No PACE access yet:** line up a cloud GPU for Part 3 if not confirmed before the T1 gate.
+- **Surrogate wins on small fires only:** fire-size control (4.3) and per-bucket reporting catch it.
 
+## Parking lot
+New ideas go here, not into a part. Reviewed only after launch.
+
+- 

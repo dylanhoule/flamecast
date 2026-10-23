@@ -9,6 +9,6 @@ def load_config(path):
     missing = REQUIRED - cfg.keys()
     if missing:
         raise ValueError(f"{path} missing keys: {sorted(missing)}")
-    if cfg["stencil"] not in (8, 16):
-        raise ValueError(f"stencil must be 8 or 16, got {cfg['stencil']}")
+    if cfg["stencil"] not in (8, 16, 32):
+        raise ValueError(f"stencil must be 8, 16 or 32, got {cfg['stencil']}")
     return cfg
